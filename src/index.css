@@ -42,6 +42,8 @@ body {
   scrollbar-width: none;
 }
 .term::-webkit-scrollbar { display: none; }
+.term { position: relative; }
+.spacer { height: calc(100% - 4em); flex-shrink: 0; }
 
 .ln { white-space: pre-wrap; word-break: break-word; min-height: 1.55em; }
 .row { display: flex; gap: 8px; align-items: baseline; }

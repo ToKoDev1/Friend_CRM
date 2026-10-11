@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { exec, importList, type Out, type Pending } from './shell/commands';
 import { RunContext, type L } from './shell/ui';
 import { parseVcards } from './lib/vcard';
@@ -55,14 +55,30 @@ export default function App() {
 
   const remove = useCallback((id: number) => setLines(ls => ls.filter(l => l.id !== id)), []);
 
-  useEffect(() => {
+  // Scrollen: Ein neuer Befehl rutscht an den oberen Rand ("anchor"), die Antwort baut sich darunter auf.
+  // Kurze Antworten auf Rückfragen (j/n) hängen sich unten an ("follow").
+  const scrollMode = useRef<'anchor' | 'follow' | 'none'>('none');
+  const anchorId = useRef<number | null>(null);
+  const [anchored, setAnchored] = useState(false);
+  useLayoutEffect(() => {
     const el = termRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (scrollMode.current === 'follow') {
+      el.scrollTop = el.scrollHeight;
+    } else if (scrollMode.current === 'anchor' && anchorId.current !== null) {
+      const target = el.querySelector<HTMLElement>(`[data-lid="${anchorId.current}"]`);
+      anchorId.current = null;
+      if (target) el.scrollTo({ top: target.offsetTop - 10, behavior: reduce ? 'auto' : 'smooth' });
+    }
   }, [lines]);
 
-  /** Gibt ein Ergebnis aus: Spinner, dann Zeilen nacheinander. */
+  /** Gibt ein Ergebnis aus: Spinner, dann Zeilen nacheinander. Ohne animate: alles auf einmal. */
   const show = useCallback(
-    async (out: Out, my: number) => {
+    async (out: Out, my: number, animate = true) => {
+      if (!animate) {
+        setLines(ls => [...ls, ...(out.lines as L[]).map(([node, cls]) => ({ id: nextId++, node, cls }))]);
+        return;
+      }
       if (out.spin && !reduce) {
         const sid = append('', 'spin');
         const t0 = Date.now();
@@ -85,10 +101,11 @@ export default function App() {
   );
 
   const handle = useCallback(
-    async (out: Out, my: number) => {
+    async (out: Out, my: number, animate = true) => {
       pending.current = out.pending;
       if (out.action === 'clear') {
         setLines([]);
+        setAnchored(false);
         return;
       }
       if (out.action === 'pickFile') fileRef.current?.click();
@@ -110,7 +127,7 @@ export default function App() {
         setInput(out.fill);
         setTimeout(() => inputRef.current?.focus(), 50);
       }
-      await show(out, my);
+      await show(out, my, animate);
     },
     [show],
   );
@@ -118,7 +135,16 @@ export default function App() {
   const run = useCallback(
     async (cmd: string, echo = true) => {
       const my = ++runId.current;
-      if (echo) append(<><span className="pr">&gt;</span> <span className="cmdtxt">{cmd}</span></>, 'in');
+      // Antwort auf eine Rückfrage: unten weiterschreiben; neuer Befehl: nach oben holen
+      const isReply = !!pending.current && cmd.trim().length <= 12;
+      scrollMode.current = isReply ? 'follow' : 'anchor';
+      if (echo) {
+        const id = append(<><span className="pr">&gt;</span> <span className="cmdtxt">{cmd}</span></>, 'in');
+        if (!isReply) {
+          anchorId.current = id;
+          setAnchored(true);
+        }
+      }
       if (cmd.trim()) {
         history.current.unshift(cmd);
         histPos.current = -1;
@@ -146,35 +172,32 @@ export default function App() {
     [run],
   );
 
-  // Start: Kopf, dann "woche" wie getippt
+  // Start: Kopf und Wochenansicht stehen sofort da, ohne Animation
   const booted = useRef(false);
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
     void navigator.storage?.persist?.();
     (async () => {
-      const snap = await snapshot();
-      append(
-        <div className="box">
-          <div><span className="acc">✻</span> <b className="logo">leute</b> <span className="dim">v0.1</span></div>
-          <div className="dim">Gedächtnis für deine Menschen</div>
-          <div className="dim">{snap.persons.length} Menschen, {snap.moments.length} Notizen, alles auf diesem Gerät</div>
-        </div>,
-        'boxln',
-      );
-      await wait(250);
-      const my = ++runId.current;
-      const id = append(<><span className="pr">&gt;</span> <span className="cmdtxt" /></>, 'in');
-      let typed = '';
-      for (const ch of 'woche') {
-        typed += ch;
-        replace(id, <><span className="pr">&gt;</span> <span className="cmdtxt">{typed}</span><span className="cur" /></>);
-        await wait(45 + Math.random() * 50);
-      }
-      replace(id, <><span className="pr">&gt;</span> <span className="cmdtxt">woche</span></>);
-      await handle(await exec('woche'), my);
+      const [snap, out] = await Promise.all([snapshot(), exec('woche')]);
+      pending.current = out.pending;
+      scrollMode.current = 'none';
+      setLines([
+        {
+          id: nextId++,
+          cls: 'boxln',
+          node: (
+            <div className="box">
+              <div><span className="acc">✻</span> <b className="logo">leute</b> <span className="dim">v0.1</span></div>
+              <div className="dim">Gedächtnis für deine Menschen</div>
+              <div className="dim">{snap.persons.length} Menschen, {snap.moments.length} Notizen, alles auf diesem Gerät</div>
+            </div>
+          ),
+        },
+        ...(out.lines as L[]).map(([node, cls]) => ({ id: nextId++, node, cls })),
+      ]);
     })();
-  }, [append, replace, handle]);
+  }, []);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,6 +226,9 @@ export default function App() {
     if (!f) return;
     const text = await f.text();
     const my = ++runId.current;
+    scrollMode.current = 'anchor';
+    anchorId.current = append(<><span className="pr">&gt;</span> <span className="cmdtxt">import {f.name}</span></>, 'in');
+    setAnchored(true);
     await handle(importList(parseVcards(text)), my);
   };
 
@@ -244,10 +270,12 @@ export default function App() {
       <main className="app">
         <div className="term" ref={termRef} aria-live="polite">
           {lines.map(l => (
-            <div key={l.id} className={`ln ${l.cls}`}>
+            <div key={l.id} data-lid={l.id} className={`ln ${l.cls}`}>
               {l.node}
             </div>
           ))}
+          {/* Platz unter der Ausgabe, damit ein neuer Befehl ganz nach oben rutschen kann */}
+          {anchored && <div className="spacer" aria-hidden="true" />}
         </div>
         <div className="dock">
           <form className="prompt" onSubmit={submit} autoComplete="off">
