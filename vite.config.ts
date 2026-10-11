@@ -3,7 +3,9 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // GitHub Pages liegt unter /Friend_CRM/
+  base: command === 'build' ? '/Friend_CRM/' : '/',
   plugins: [
     react(),
     VitePWA({
@@ -35,4 +37,4 @@ export default defineConfig({
     }),
   ],
   server: { host: true },
-})
+}))
