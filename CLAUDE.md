@@ -29,3 +29,8 @@ Eingabefeld 16px (sonst zoomt iOS). Alles Antippbare ist ein `<C cmd="…">`.
 - Jede Logikänderung mit Test. `npm test` und `npm run build` müssen grün sein.
 - Keine Daten über Dritte an externe Dienste ohne ausdrückliche Entscheidung von Tobias.
 - Keine Gedankenstriche in UI-Texten.
+
+## Deploy
+`npm run deploy` testet, baut und schiebt `dist/` auf den Branch `gh-pages` (GitHub Pages, ohne Actions).
+Adresse: https://tokodev1.github.io/Friend_CRM/ (nur zum Testen für Tobias, Daten bleiben auf dem Gerät).
+Repo ist öffentlich: keine echten Namen, Nummern oder Notizen in Code, Tests oder Seeds.
